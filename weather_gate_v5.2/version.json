@@ -1,8 +1,0 @@
-{
-  "version": "4.4.2",
-  "fw_url": "/local/ota/smart_counter/firmware.bin",
-  "fs_url": "/local/ota/smart_counter/littlefs.bin",
-  "changelog": "Update",
-  "fw_md5": "a6d0bae4832c986e61ea1891f5265bc6",
-  "fs_md5": "8aef729f1e900c0d76b60c1fedd23f5a"
-}
