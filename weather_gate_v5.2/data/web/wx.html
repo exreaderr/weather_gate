@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Погодный шлюз — МикроОС 5.0</title>
+<meta name="theme-color" content="#f3eee2">
+<meta name="description" content="Панель погодного шлюза weather_gate на МикроОС 5.0">
+<link rel="stylesheet" href="/web/uplot.css">
+<script src="/web/uplot.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+:root {
+  --bg: #f3eee2; --card: #fffdf6; --text: #3b3226; --text2: #8a7c63;
+  --border: #ddd0b8; --field: #bfa982; --info: #9a6716; --success: #5d8a3c;
+  --warning: #cf8a1c; --error: #b23c2e; --svc: #71634f;
+  --radius: 16px; --shadow: 0 2px 10px rgba(93,72,41,.10);
+}
+body.dark {
+  --bg: #1f1810; --card: #2a2114; --text: #ede3cf; --text2: #ab997a;
+  --border: #4a3d27; --field: #6b5834; --svc: #584b37;
+  --shadow: 0 2px 10px rgba(0,0,0,.5);
+}
+body {
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg); color: var(--text); transition: background .3s, color .3s;
+  padding: calc(10px + env(safe-area-inset-top)) calc(10px + env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) calc(10px + env(safe-area-inset-left));
+}
+.container { max-width: 700px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; }
+.hidden { display: none !important; }
+.card {
+  background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 14px 16px;
+}
+.topbar { display: flex; align-items: center; gap: 8px; }
+.topbar h1 { font-size: 18px; flex: 1; }
+.topbar a, .topbar button {
+  border: 1px solid var(--border); background: none; color: var(--text2);
+  border-radius: 10px; padding: 6px 10px; font-size: 14px; cursor: pointer;
+  text-decoration: none;
+}
+.now-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; }
+.now-temp { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 12px; }
+.now-temp .big { font-size: 46px; font-weight: 700; }
+.now-temp .state { font-size: 16px; color: var(--info); }
+.metric { font-size: 14px; color: var(--text2); }
+.metric b { color: var(--text); font-size: 16px; font-weight: 600; }
+.warn { color: var(--warning); font-weight: 600; }
+.age { font-size: 12px; color: var(--text2); margin-top: 6px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.chip {
+  border: 1px solid var(--border); background: none; color: var(--text2);
+  border-radius: 999px; padding: 5px 12px; font-size: 13px; cursor: pointer;
+}
+.chip.active { background: var(--field); border-color: var(--field); color: #fff; }
+#chartBox { width: 100%; min-height: 120px; }
+.hint { font-size: 13px; color: var(--text2); }
+input[type=password] {
+  width: 100%; padding: 10px 12px; border: 1px solid var(--border);
+  border-radius: 10px; background: var(--bg); color: var(--text); font-size: 15px;
+  margin: 8px 0;
+}
+.btn {
+  display: inline-block; border: none; border-radius: 10px; padding: 10px 16px;
+  background: var(--field); color: #fff; font-size: 15px; cursor: pointer;
+}
+.err { color: var(--error); font-size: 13px; min-height: 16px; }
+#toast {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+  background: var(--svc); color: #fff; padding: 10px 18px; border-radius: 12px;
+  opacity: 0; transition: opacity .3s; pointer-events: none; z-index: 50;
+}
+#toast.show { opacity: 1; }
+#toast.err { background: var(--error); }
+#toast.ok { background: var(--success); }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="topbar">
+    <h1>Погодный шлюз</h1>
+    <a href="/">Главная</a>
+    <button onclick="toggleTheme()" title="Тема">◑</button>
+  </div>
+
+  <!-- ТЕКУЩЕЕ СОСТОЯНИЕ -->
+  <div class="card">
+    <div class="now-grid">
+      <div class="now-temp">
+        <span class="big" id="nowTemp">—</span>
+        <span class="state" id="nowState"></span>
+      </div>
+      <div class="metric">Ощущается как<br><b id="nowFeels">—</b></div>
+      <div class="metric">Влажность<br><b id="nowHum">—</b></div>
+      <div class="metric">Ветер<br><b id="nowWind">—</b></div>
+      <div class="metric">Порывы<br><b id="nowGust">—</b></div>
+      <div class="metric">Направление<br><b id="nowDir">—</b></div>
+      <div class="metric">Дождь, мм/ч<br><b id="nowRain">—</b></div>
+      <div class="metric">Давление<br><b id="nowPress">—</b></div>
+      <div class="metric">Сигнал (RSSI)<br><b id="nowRssi">—</b></div>
+    </div>
+    <div class="age" id="nowAge"></div>
+    <div class="age warn hidden" id="nowBatt">&#9888; Батарея уличного блока разряжена</div>
+  </div>
+
+  <!-- ГРАФИКИ -->
+  <div class="card">
+    <b>История</b>
+    <div id="loginBox" class="hidden">
+      <div class="hint" style="margin-top:6px">Графики доступны после входа администратора.</div>
+      <input type="password" id="passInput" placeholder="Пароль администратора" autocomplete="current-password">
+      <div class="err" id="authErr"></div>
+      <button class="btn" onclick="doLogin()">Войти</button>
+    </div>
+    <div id="chartArea" class="hidden">
+      <div class="chips" id="chartChannels"></div>
+      <div class="chips">
+        <button class="chip chart-range active" data-range="6h" onclick="setChartRange('6h')">6 ч</button>
+        <button class="chip chart-range" data-range="24h" onclick="setChartRange('24h')">24 ч</button>
+        <button class="chip chart-range" data-range="7d" onclick="setChartRange('7d')">7 д</button>
+        <button class="chip chart-range" data-range="30d" onclick="setChartRange('30d')">30 д</button>
+        <button class="chip chart-range" data-range="1y" onclick="setChartRange('1y')">Год</button>
+      </div>
+      <div id="chartBox"></div>
+      <div class="hint" id="chartHint"></div>
+    </div>
+  </div>
+
+  <div class="card hint">
+    weather_gate · МикроОС 5.0 ·
+    <a href="/api/dev/weather" style="color:var(--info)">weather-JSON</a>
+  </div>
+
+</div>
+<div id="toast"></div>
+
+<script>
+// ============================================================================
+// ПАНЕЛЬ ПОГОДНОГО ШЛЮЗА (W3)
+// ============================================================================
+function $(id){ return document.getElementById(id); }
+
+var S = {
+  token: sessionStorage.getItem('mos_token') || ''
+};
+
+var WX_MAP = {
+  'sunny':'Ясно','clear-night':'Ясно','partlycloudy':'Переменная облачность',
+  'cloudy':'Облачно','rainy':'Дождь','pouring':'Ливень','windy':'Ветрено',
+  'windy-variant':'Ветрено','snowy':'Снег','snowy-rainy':'Мокрый снег',
+  'fog':'Туман','hail':'Град','lightning':'Гроза','lightning-rainy':'Гроза с дождём',
+  'exceptional':'Особое'
+};
+var DIR16 = ['С','ССВ','СВ','ВСВ','В','ВЮВ','ЮВ','ЮЮВ',
+             'Ю','ЮЮЗ','ЮЗ','ЗЮЗ','З','ЗСЗ','СЗ','ССЗ'];
+
+function toast(msg, kind){
+  var t=$('toast'); t.textContent=msg; t.className='show '+(kind||'');
+  clearTimeout(t._tm); t._tm=setTimeout(function(){ t.className=''; }, 3000);
+}
+function applyTheme(){
+  if(localStorage.getItem('mos_theme')==='dark') document.body.classList.add('dark');
+  else document.body.classList.remove('dark');
+}
+function toggleTheme(){
+  localStorage.setItem('mos_theme', document.body.classList.contains('dark')?'light':'dark');
+  applyTheme();
+}
+function fmtAge(sec){
+  sec=+sec||0;
+  if(sec<90) return sec+' с назад';
+  if(sec<5400) return Math.round(sec/60)+' мин назад';
+  return Math.round(sec/3600)+' ч назад';
+}
+
+// ============================================================================
+// API-КЛИЕНТ
+// ============================================================================
+async function api(url, opts){
+  opts=opts||{};
+  opts.headers=opts.headers||{};
+  if(S.token) opts.headers['X-Auth-Token']=S.token;
+  var res;
+  try { res=await fetch(url,opts); }
+  catch(e){ toast('Нет связи с контроллером','err'); throw e; }
+  var ct=res.headers.get('content-type')||'';
+  var isJson=ct.indexOf('json')>=0 && ct.indexOf('json-lines')<0;
+  var data=isJson?await res.json().catch(function(){return{};}):await res.text();
+  return { ok: res.ok, status: res.status, data: data };
+}
+async function apiPost(url){ return api(url,{method:'POST'}); }
+
+// ============================================================================
+// ТЕКУЩЕЕ СОСТОЯНИЕ (публичный /api/dev/weather, обновление 30 с)
+// ============================================================================
+async function refreshNow(){
+  var r=await api('/api/dev/weather');
+  if(!r.ok){ $('nowAge').textContent='Нет связи'; return; }
+  var w=r.data;
+  if(!w.valid){
+    $('nowTemp').textContent='—';
+    $('nowState').textContent='';
+    $('nowAge').textContent='Пакетов от уличного блока ещё не было';
+    return;
+  }
+  $('nowTemp').textContent=(+w.temp).toFixed(1)+'°C';
+  $('nowState').textContent=WX_MAP[w.state]||w.state||'';
+  $('nowFeels').textContent=(+w.feels_like).toFixed(1)+'°C';
+  $('nowHum').textContent=(+w.humidity).toFixed(0)+' %';
+  $('nowWind').textContent=(+w.wind).toFixed(1)+' м/с';
+  $('nowGust').textContent=(+w.gust).toFixed(1)+' м/с';
+  var d=Math.round((+w.dir)/22.5)%16;
+  $('nowDir').textContent=DIR16[d]+' ('+(+w.dir)+'°)';
+  $('nowRain').textContent=(+w.rain).toFixed(1);
+  $('nowPress').textContent=w.press_sea!=null?
+    Math.round(+w.press_sea*0.750062)+' мм рт.ст.':'—';
+  $('nowRssi').textContent=w.rssi+' дБм';
+  $('nowAge').textContent='Обновлено '+fmtAge(w.age_s)+' · станция '+fmtAge(w.age_s);
+  $('nowBatt').classList.toggle('hidden', w.batt!==0);
+}
+
+// ============================================================================
+// ВХОД АДМИНИСТРАТОРА (для графиков)
+// ============================================================================
+async function doLogin(){
+  $('authErr').textContent='';
+  var p=$('passInput').value;
+  if(p.length<4){ $('authErr').textContent='Минимум 4 символа'; return; }
+  var r=await apiPost('/api/auth?pin='+encodeURIComponent(p));
+  if(r.ok && r.data.token){
+    S.token=r.data.token; sessionStorage.setItem('mos_token',S.token);
+    enterCharts();
+  } else if(r.data && r.data.error==='locked'){
+    $('authErr').textContent='Вход заблокирован на '+(r.data.sec||60)+' с';
+  } else $('authErr').textContent='Неверный пароль';
+}
+function enterCharts(){
+  $('loginBox').classList.add('hidden');
+  $('chartArea').classList.remove('hidden');
+  loadCharts();
+}
+
+// ============================================================================
+// ГРАФИКИ (даталоггер, uPlot — встроен офлайн, /web/uplot.js)
+// ============================================================================
+var chartInst=null, chartCh=0, chartRange='6h', chartChannels=[];
+async function loadCharts(){
+  var r=await api('/api/dev/dlog/channels');
+  if(!r.ok){
+    if(r.status===401||r.status===404){ // токен протух — покажем вход
+      S.token=''; sessionStorage.removeItem('mos_token');
+      $('chartArea').classList.add('hidden');
+      $('loginBox').classList.remove('hidden');
+      return;
+    }
+    $('chartHint').textContent='Даталоггер недоступен'; return;
+  }
+  chartChannels=r.data.channels||[];
+  var host=$('chartChannels');
+  host.innerHTML='';
+  if(chartChannels.length===0){ $('chartHint').textContent='Каналы не зарегистрированы'; return; }
+  if(chartCh>=chartChannels.length) chartCh=0;
+  for(var i=0;i<chartChannels.length;i++){
+    (function(ch){
+      var b=document.createElement('button');
+      b.className='chip chart-chan'+(ch.i===chartCh?' active':'');
+      b.textContent=ch.name;
+      b.onclick=function(){ chartCh=ch.i; refreshChart(); };
+      host.appendChild(b);
+    })(chartChannels[i]);
+  }
+  refreshChart();
+}
+function setChartRange(r){
+  chartRange=r;
+  var btns=document.querySelectorAll('.chart-range');
+  for(var i=0;i<btns.length;i++) btns[i].classList.toggle('active', btns[i].dataset.range===r);
+  refreshChart();
+}
+async function refreshChart(){
+  var chs=document.querySelectorAll('.chart-chan');
+  for(var i=0;i<chs.length;i++) chs[i].classList.toggle('active', i===chartCh);
+  var r=await api('/api/dev/dlog?ch='+chartCh+'&range='+chartRange);
+  if(!r.ok){ $('chartHint').textContent='Нет данных'; return; }
+  var d=r.data, ch=chartChannels[chartCh]||{name:'',unit:''};
+  if(!d.ts||d.ts.length<2){
+    $('chartHint').textContent='История накапливается — точки появятся после первых пакетов';
+    destroyChart(); return;
+  }
+  $('chartHint').textContent='';
+  drawChart(d, ch);
+}
+function destroyChart(){
+  if(chartInst){ chartInst.destroy(); chartInst=null; }
+  $('chartBox').innerHTML='';
+}
+function drawChart(d, ch){
+  destroyChart();
+  var cs=getComputedStyle(document.body);
+  var colText2=cs.getPropertyValue('--text2').trim()||'#8a7c63';
+  var colBorder=cs.getPropertyValue('--border').trim()||'#ddd0b8';
+  var w=($('chartBox').clientWidth||340)-16;
+  var series=[{label:'Время'}];
+  var data=[d.ts];
+  if(d.fmt==='raw'){
+    series.push({label:ch.name+(ch.unit?', '+ch.unit:''), stroke:'#cf8a1c', width:2,
+                 points:{show:d.ts.length<80, size:4}});
+    data.push(d.v);
+  }else{
+    series.push({label:'Среднее'+(ch.unit?', '+ch.unit:''), stroke:'#cf8a1c', width:2});
+    series.push({label:'Мин', stroke:'#8a7c63', width:1, dash:[5,5]});
+    series.push({label:'Макс', stroke:'#b23c2e', width:1, dash:[5,5]});
+    data.push(d.avg, d.min, d.max);
+  }
+  var axStyle={stroke:colText2, grid:{stroke:colBorder, width:1}, ticks:{stroke:colBorder}};
+  chartInst=new uPlot({
+    width:w, height:280,
+    scales:{x:{time:true}},
+    axes:[axStyle, axStyle],
+    series:series,
+    legend:{show:true},
+    cursor:{show:true}
+  }, data, $('chartBox'));
+}
+
+// ============================================================================
+// СТАРТ
+// ============================================================================
+applyTheme();
+refreshNow();
+setInterval(refreshNow, 30000);
+if(S.token){ enterCharts(); } else { $('loginBox').classList.remove('hidden'); }
+</script>
+</body>
+</html>
